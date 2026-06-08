@@ -72,7 +72,9 @@ jobs:
             cd /opt/vilma
             # Wait for cloud-init bootstrap to finish on a brand-new VM.
             for i in $(seq 1 30); do [ -f .bootstrap-complete ] && break; echo "waiting for bootstrap..."; sleep 5; done
-            docker compose -f docker-compose.prod.yml pull
+            # Pull only the app images (GHCR — reliable + the only ones that change each deploy).
+            # postgres:16-alpine comes from the local cache, so deploys don't depend on Docker Hub uptime.
+            docker compose -f docker-compose.prod.yml pull backend frontend
             docker compose -f docker-compose.prod.yml up -d
             # Apply schema + ensure an admin exists (both idempotent, non-destructive).
             docker compose -f docker-compose.prod.yml run --rm backend node src/db/migrate.js
