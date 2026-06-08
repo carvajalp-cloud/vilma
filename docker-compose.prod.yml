@@ -1,0 +1,42 @@
+# Production stack for the Azure VM.
+# Runs prebuilt images pulled from a registry (GHCR). Variable substitution
+# (${REGISTRY}, ${TAG}, ${PG*}) and the backend's env come from /opt/vilma/.env.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
+      POSTGRES_DB: ${PGDATABASE}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER} -d ${PGDATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Not published to the host — only reachable on the internal Docker network.
+
+  backend:
+    image: ${REGISTRY}/vilma-backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5514:5514/udp"   # inbound syslog from network devices
+    expose:
+      - "4000"
+
+  frontend:
+    image: ${REGISTRY}/vilma-frontend:${TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  pgdata:

@@ -1,0 +1,79 @@
+name: Deploy Vilma
+
+# Builds backend + frontend images, pushes them to GitHub Container Registry (GHCR),
+# then deploys to the Azure VM over SSH (pull images, run DB migration, restart stack).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      owner_lc: ${{ steps.vars.outputs.owner_lc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute lowercase owner
+        id: vars
+        run: echo "owner_lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/${{ steps.vars.outputs.owner_lc }}/vilma-backend:latest
+            ghcr.io/${{ steps.vars.outputs.owner_lc }}/vilma-backend:${{ github.sha }}
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ghcr.io/${{ steps.vars.outputs.owner_lc }}/vilma-frontend:latest
+            ghcr.io/${{ steps.vars.outputs.owner_lc }}/vilma-frontend:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USER }}
+          key: ${{ secrets.AZURE_VM_SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN
+          script: |
+            set -e
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            cd /opt/vilma
+            # Wait for cloud-init bootstrap to finish on a brand-new VM.
+            for i in $(seq 1 30); do [ -f .bootstrap-complete ] && break; echo "waiting for bootstrap..."; sleep 5; done
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            # Apply schema + ensure an admin exists (both idempotent, non-destructive).
+            docker compose -f docker-compose.prod.yml run --rm backend node src/db/migrate.js
+            docker compose -f docker-compose.prod.yml run --rm backend node src/db/bootstrap.js
+            docker image prune -f
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

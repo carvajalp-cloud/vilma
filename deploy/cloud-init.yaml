@@ -1,0 +1,50 @@
+#cloud-config
+# Vilma VM bootstrap: installs Docker, lays down /opt/vilma/{docker-compose.prod.yml,.env}.
+# Placeholders (__REGISTRY__, __ADMIN_USER__, __COMPOSE_B64__) are substituted by deploy/provision.ps1
+# before this file is base64-encoded into the VM customData. The app is started by the
+# GitHub Actions deploy job (which logs in to the registry and pulls images).
+package_update: true
+
+write_files:
+  # The production compose file, injected verbatim (base64) to avoid YAML indentation issues.
+  - path: /opt/vilma/docker-compose.prod.yml
+    encoding: b64
+    permissions: '0644'
+    content: __COMPOSE_B64__
+
+runcmd:
+  # --- Install Docker Engine + compose plugin ---
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker __ADMIN_USER__
+  - systemctl enable --now docker
+
+  # --- Generate the environment file with strong random secrets ---
+  - mkdir -p /opt/vilma
+  - |
+    cat > /opt/vilma/.env <<EOF
+    # --- image source (set at provision time) ---
+    REGISTRY=__REGISTRY__
+    TAG=latest
+    # --- database ---
+    PGHOST=db
+    PGPORT=5432
+    PGUSER=vilma
+    PGPASSWORD=$(openssl rand -hex 18)
+    PGDATABASE=vilma
+    # --- api / auth ---
+    PORT=4000
+    JWT_SECRET=$(openssl rand -hex 32)
+    JWT_EXPIRES_IN=12h
+    # --- initial admin (used once by bootstrap.js; change password after first login) ---
+    ADMIN_USERNAME=admin
+    ADMIN_PASSWORD=$(openssl rand -hex 12)
+    # --- syslog listener ---
+    SYSLOG_ENABLED=true
+    SYSLOG_PORT=5514
+    SYSLOG_HOST=0.0.0.0
+    # --- cors (same-origin via nginx proxy, so permissive is fine) ---
+    CORS_ORIGIN=*
+    EOF
+  - chmod 600 /opt/vilma/.env
+  - chown -R __ADMIN_USER__:__ADMIN_USER__ /opt/vilma
+  - touch /opt/vilma/.bootstrap-complete

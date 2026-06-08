@@ -1,0 +1,24 @@
+# dependencies & build output
+node_modules/
+dist/
+
+# secrets & local env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+server.log
+server.err.log
+vite.log
+vite.err.log
+
+# ssh keys (never commit these)
+*.pem
+id_rsa*
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
