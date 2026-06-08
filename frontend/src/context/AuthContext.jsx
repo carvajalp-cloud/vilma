@@ -20,8 +20,14 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get('/auth/me');
       setUser(data);
-      if (data.role !== 'admin' && data.adom_id != null) {
-        setAdom(String(data.adom_id));
+      if (data.role !== 'admin') {
+        // Keep the user's current customer selection if it's still one they can access;
+        // otherwise default to their primary / first customer.
+        const allowed = (data.customers || []).map((c) => String(c.id));
+        const cur = localStorage.getItem('faz_adom');
+        if (!cur || cur === 'all' || (allowed.length && !allowed.includes(cur))) {
+          setAdom(String(data.adom_id ?? allowed[0] ?? ''));
+        }
       }
     } catch {
       setUser(null);
@@ -35,8 +41,8 @@ export function AuthProvider({ children }) {
   const login = async (username, password) => {
     const { data } = await api.post('/auth/login', { username, password });
     localStorage.setItem('faz_token', data.token);
-    if (data.user.role !== 'admin' && data.user.adom_id != null) {
-      setAdom(String(data.user.adom_id));
+    if (data.user.role !== 'admin') {
+      setAdom(String(data.user.adom_id ?? (data.user.adoms && data.user.adoms[0]) ?? ''));
     } else {
       setAdom('all');
     }

@@ -13,6 +13,8 @@ export function authenticate(req, res, next) {
       username: payload.username,
       role: payload.role,
       adom_id: payload.adom_id ?? null,
+      // Customers this non-admin user may access (empty for admins, who see all).
+      adoms: Array.isArray(payload.adoms) ? payload.adoms : (payload.adom_id != null ? [payload.adom_id] : []),
     };
     next();
   } catch (err) {
@@ -33,19 +35,26 @@ export function requireRole(...roles) {
 
 // Resolves the effective ADOM scope for the request.
 // - Admins may target any ADOM via ?adom=<id> (or see all when omitted -> null).
-// - Non-admins are locked to their assigned adom_id.
+// - Non-admins are restricted to the set of customers assigned to them; they view one
+//   at a time (?adom=<id> must be one of theirs, else it defaults to their first).
 // Attaches req.adomScope = number | null  (null = all ADOMs, admin only).
 export function resolveAdomScope(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (req.user.role === 'admin') {
     const q = req.query.adom;
     req.adomScope = q != null && q !== '' && q !== 'all' ? parseInt(q, 10) : null;
-  } else {
-    if (req.user.adom_id == null) {
-      return res.status(403).json({ error: 'User is not assigned to an ADOM' });
-    }
-    req.adomScope = req.user.adom_id;
+    return next();
   }
+  const allowed = req.user.adoms && req.user.adoms.length
+    ? req.user.adoms
+    : (req.user.adom_id != null ? [req.user.adom_id] : []);
+  if (!allowed.length) {
+    return res.status(403).json({ error: 'User is not assigned to any customer' });
+  }
+  const q = req.query.adom;
+  const requested = q != null && q !== '' && q !== 'all' ? parseInt(q, 10) : null;
+  // Honor the requested customer only if it's one the user is allowed to see.
+  req.adomScope = requested != null && allowed.includes(requested) ? requested : allowed[0];
   next();
 }
 

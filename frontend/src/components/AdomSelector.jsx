@@ -12,7 +12,15 @@ export default function AdomSelector() {
   }, []);
 
   if (user?.role !== 'admin') {
-    const current = adoms.find((a) => String(a.id) === String(user?.adom_id));
+    // Multiple assigned customers -> let them switch between their own.
+    if (adoms.length > 1) {
+      return (
+        <select value={adom} onChange={(e) => { setAdom(e.target.value); window.location.reload(); }}>
+          {adoms.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      );
+    }
+    const current = adoms.find((a) => String(a.id) === String(adom)) || adoms[0];
     return <span className="pill">Customer: {current?.name || user?.adom_id || '—'}</span>;
   }
 

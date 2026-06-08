@@ -14,8 +14,11 @@ router.get('/', authenticate, async (req, res, next) => {
       );
       return res.json(r.rows);
     }
-    if (req.user.adom_id == null) return res.json([]);
-    const r = await pool.query('SELECT * FROM adoms WHERE id = $1', [req.user.adom_id]);
+    const ids = req.user.adoms && req.user.adoms.length
+      ? req.user.adoms
+      : (req.user.adom_id != null ? [req.user.adom_id] : []);
+    if (!ids.length) return res.json([]);
+    const r = await pool.query('SELECT * FROM adoms WHERE id = ANY($1) ORDER BY name', [ids]);
     res.json(r.rows);
   } catch (err) {
     next(err);

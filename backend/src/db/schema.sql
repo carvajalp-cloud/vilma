@@ -20,6 +20,19 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- A user (analyst/viewer) may be granted access to several customers (ADOMs).
+-- Admins are global and have no rows here.
+CREATE TABLE IF NOT EXISTS user_adoms (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  adom_id INTEGER NOT NULL REFERENCES adoms(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, adom_id)
+);
+
+-- Backfill the membership table from the legacy single users.adom_id (idempotent).
+INSERT INTO user_adoms (user_id, adom_id)
+SELECT id, adom_id FROM users WHERE adom_id IS NOT NULL
+ON CONFLICT DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS devices (
   id         SERIAL PRIMARY KEY,
   adom_id    INTEGER NOT NULL REFERENCES adoms(id) ON DELETE CASCADE,
