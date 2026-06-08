@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS devices (
   UNIQUE (adom_id, devid)
 );
 
+-- Per-device rolling storage quota (NULL = unlimited). When a device's estimated
+-- log storage exceeds this, the oldest logs are deleted to keep the newest.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS quota_bytes BIGINT;
+
 -- A device may receive logs from several source IPs (e.g. SD-WAN with multiple WAN links).
 -- Matching is primarily by serial (devid); these IPs are the secondary match + auto-learned set.
 CREATE TABLE IF NOT EXISTS device_ips (

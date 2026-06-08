@@ -13,6 +13,7 @@ import userRoutes from './routes/users.js';
 import adomRoutes from './routes/adoms.js';
 
 import { startSyslogListener } from './services/syslog.js';
+import { startQuotaEnforcement } from './services/quota.js';
 
 const app = express();
 app.set('trust proxy', true);
@@ -49,6 +50,7 @@ app.use((err, req, res, next) => {
 const server = app.listen(config.port, () => {
   console.log(`[api] Vilma backend listening on http://localhost:${config.port}`);
   startSyslogListener();
+  startQuotaEnforcement();
 });
 
 // Graceful shutdown

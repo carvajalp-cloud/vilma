@@ -1,9 +1,38 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { fmtTime, fmtNum } from '../utils.js';
+import { fmtTime, fmtNum, fmtBytes } from '../utils.js';
 
-const BLANK = { name: '', devid: '', model: '', type: 'firewall', status: 'unknown', adom_id: '', ips: [] };
+const BLANK = { name: '', devid: '', model: '', type: 'firewall', status: 'unknown', adom_id: '', ips: [], quota_bytes: null };
+
+const GB = 1024 ** 3;
+const TB = 1024 ** 4;
+const quotaToBytes = (value, unit) => {
+  const n = Number(value);
+  if (!value || !Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * (unit === 'TB' ? TB : GB));
+};
+const bytesToQuota = (bytes) => {
+  if (!bytes) return { value: '', unit: 'GB' };
+  return bytes >= TB
+    ? { value: +(bytes / TB).toFixed(2), unit: 'TB' }
+    : { value: +(bytes / GB).toFixed(2), unit: 'GB' };
+};
+
+// Small usage/quota bar for the table.
+function StorageCell({ usage, quota }) {
+  if (!quota) return <span className="mono">{fmtBytes(usage)}<span className="muted"> / ∞</span></span>;
+  const pct = Math.min(100, Math.round((usage / quota) * 100));
+  const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--amber)' : 'var(--green)';
+  return (
+    <div style={{ minWidth: 120 }}>
+      <span className="mono" style={{ fontSize: 12 }}>{fmtBytes(usage)} / {fmtBytes(quota)}</span>
+      <div style={{ height: 5, background: 'var(--bg-3)', borderRadius: 3, marginTop: 3 }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3 }} />
+      </div>
+    </div>
+  );
+}
 
 export default function Devices() {
   const { user } = useAuth();
@@ -40,8 +69,8 @@ export default function Devices() {
         <table>
           <thead>
             <tr>
-              <th>Name</th><th>Source IPs</th><th>Serial</th><th>Model</th><th>Type</th>
-              <th>Customer</th><th>Status</th><th>Last Seen</th><th>Logs (24h)</th>
+              <th>Name</th><th>Source IPs</th><th>Serial</th><th>Type</th>
+              <th>Customer</th><th>Status</th><th>Storage (used / quota)</th><th>Last Seen</th><th>Logs (24h)</th>
               {canManage && <th>Actions</th>}
             </tr>
           </thead>
@@ -55,10 +84,10 @@ export default function Devices() {
                     : '—'}
                 </td>
                 <td className="mono">{d.devid || '—'}</td>
-                <td>{d.model || '—'}</td>
                 <td>{d.type}</td>
                 <td>{d.adom_name}</td>
                 <td><span className={`badge ${d.status}`}>{d.status}</span></td>
+                <td><StorageCell usage={d.usage_bytes} quota={d.quota_bytes} /></td>
                 <td className="mono">{d.last_seen ? fmtTime(d.last_seen) : 'never'}</td>
                 <td>{fmtNum(d.logs_24h)}</td>
                 {canManage && (
@@ -97,6 +126,9 @@ export default function Devices() {
 function DeviceForm({ mode, device, adoms, isAdmin, onClose, onSaved }) {
   const [form, setForm] = useState(device);
   const [ipInput, setIpInput] = useState('');
+  const initQuota = bytesToQuota(device.quota_bytes);
+  const [quotaValue, setQuotaValue] = useState(initQuota.value);
+  const [quotaUnit, setQuotaUnit] = useState(initQuota.unit);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -117,6 +149,7 @@ function DeviceForm({ mode, device, adoms, isAdmin, onClose, onSaved }) {
       const body = {
         name: form.name, devid: form.devid || null, model: form.model,
         type: form.type, status: form.status, ips: form.ips,
+        quota_bytes: quotaToBytes(quotaValue, quotaUnit),
       };
       if (mode === 'create') {
         if (isAdmin) body.adom_id = form.adom_id;
@@ -182,6 +215,23 @@ function DeviceForm({ mode, device, adoms, isAdmin, onClose, onSaved }) {
               <option value="other">Other</option>
             </select>
           </div>
+        </div>
+
+        {/* Rolling storage quota */}
+        <div className="field" style={{ marginTop: 14 }}>
+          <label>Storage quota <span className="muted">(when exceeded, oldest logs are deleted — newest kept)</span></label>
+          <div className="flex">
+            <input
+              type="number" min="0" step="any" value={quotaValue}
+              onChange={(e) => setQuotaValue(e.target.value)}
+              placeholder="unlimited" style={{ flex: 1 }}
+            />
+            <select value={quotaUnit} onChange={(e) => setQuotaUnit(e.target.value)} style={{ width: 90 }}>
+              <option value="GB">GB</option>
+              <option value="TB">TB</option>
+            </select>
+          </div>
+          <span className="muted" style={{ fontSize: 11 }}>Leave blank for unlimited retention.</span>
         </div>
 
         {mode === 'edit' && (
