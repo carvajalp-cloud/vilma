@@ -5,8 +5,8 @@ import { useAuth } from '../context/AuthContext.jsx';
 export default function Login() {
   const { login, user } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -29,6 +29,7 @@ export default function Login() {
     <div className="login-wrap">
       <div className="card login-card">
         <div className="brand"><span className="logo">◆</span> Vilma</div>
+        <div className="login-tagline">Log Analyzer for Networks</div>
         <form onSubmit={submit}>
           {error && <div className="error-msg">{error}</div>}
           <div className="field">
@@ -43,12 +44,7 @@ export default function Login() {
             {busy ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
-        <div className="hint">
-          Demo accounts:<br />
-          • admin / admin123 (global admin)<br />
-          • analyst / analyst123 (Acme-Corp)<br />
-          • viewer / viewer123 (Acme-Corp)
-        </div>
+        <div className="login-vendor">Vijor Networks</div>
       </div>
     </div>
   );
