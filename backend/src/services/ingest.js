@@ -1,33 +1,53 @@
 import pool from '../db/pool.js';
 import { evaluateAlerts } from './alerting.js';
 
-// Cache: "adomId:devid" -> deviceId, to avoid a lookup on every log.
+// Cache: "dev:<devid>" -> {id, adom_id}, to avoid a lookup on every log.
 const deviceCache = new Map();
+// Source IPs we've already associated with their device this process lifetime,
+// so we don't issue an INSERT on every single log (only the first time an IP appears).
+const knownIps = new Set();
+
+// Record a source IP against a device. For auto-learned IPs we never steal an IP
+// that already belongs to another device (ON CONFLICT DO NOTHING).
+async function learnIp(client, deviceId, sourceIp) {
+  if (!sourceIp || knownIps.has(sourceIp)) return;
+  await client.query(
+    `INSERT INTO device_ips (device_id, ip, auto) VALUES ($1, $2, true)
+     ON CONFLICT (ip) DO NOTHING`,
+    [deviceId, sourceIp]
+  );
+  knownIps.add(sourceIp);
+}
 
 // Resolve (or auto-register) a device for an incoming log.
 // `defaultAdomId` is used when the device can't be matched to an existing one.
 async function resolveDevice(client, parsed, sourceIp, defaultAdomId) {
   const devid = parsed._devid;
 
-  // 1. Try to match an existing device by devid across any ADOM.
+  // 1. Match by devid (serial) across any ADOM — this is the reliable key, and it
+  //    handles SD-WAN: every log from a FortiGate carries the same devid regardless
+  //    of which WAN link / source IP it egressed from.
   if (devid) {
     const cacheKey = `dev:${devid}`;
-    if (deviceCache.has(cacheKey)) return deviceCache.get(cacheKey);
-    const r = await client.query(
-      'SELECT id, adom_id FROM devices WHERE devid = $1 LIMIT 1',
-      [devid]
-    );
-    if (r.rows[0]) {
-      const found = { id: r.rows[0].id, adom_id: r.rows[0].adom_id };
-      deviceCache.set(cacheKey, found);
+    let found = deviceCache.get(cacheKey);
+    if (!found) {
+      const r = await client.query('SELECT id, adom_id FROM devices WHERE devid = $1 LIMIT 1', [devid]);
+      if (r.rows[0]) {
+        found = { id: r.rows[0].id, adom_id: r.rows[0].adom_id };
+        deviceCache.set(cacheKey, found);
+      }
+    }
+    if (found) {
+      await learnIp(client, found.id, sourceIp); // accumulate this device's source IPs
       return found;
     }
   }
 
-  // 2. Try to match by source IP.
+  // 2. Match by source IP against the device's known IP set.
   if (sourceIp) {
     const r = await client.query(
-      'SELECT id, adom_id FROM devices WHERE ip = $1 LIMIT 1',
+      `SELECT d.id, d.adom_id FROM device_ips di JOIN devices d ON d.id = di.device_id
+       WHERE di.ip = $1 LIMIT 1`,
       [sourceIp]
     );
     if (r.rows[0]) return { id: r.rows[0].id, adom_id: r.rows[0].adom_id };
@@ -44,6 +64,7 @@ async function resolveDevice(client, parsed, sourceIp, defaultAdomId) {
   );
   const created = { id: r.rows[0].id, adom_id: r.rows[0].adom_id };
   if (devid) deviceCache.set(`dev:${devid}`, created);
+  await learnIp(client, created.id, sourceIp);
   return created;
 }
 
@@ -96,5 +117,6 @@ export async function ingestParsedLog(parsed, sourceIp) {
 
 export function clearDeviceCache() {
   deviceCache.clear();
+  knownIps.clear();
   _defaultAdomId = null;
 }

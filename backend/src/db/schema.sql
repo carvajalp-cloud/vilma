@@ -35,6 +35,22 @@ CREATE TABLE IF NOT EXISTS devices (
   UNIQUE (adom_id, devid)
 );
 
+-- A device may receive logs from several source IPs (e.g. SD-WAN with multiple WAN links).
+-- Matching is primarily by serial (devid); these IPs are the secondary match + auto-learned set.
+CREATE TABLE IF NOT EXISTS device_ips (
+  id         SERIAL PRIMARY KEY,
+  device_id  INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  ip         TEXT NOT NULL UNIQUE,
+  auto       BOOLEAN NOT NULL DEFAULT false,   -- true = learned from traffic, false = added manually
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_ips_device ON device_ips(device_id);
+
+-- Backfill from the legacy single ip column (idempotent).
+INSERT INTO device_ips (device_id, ip, auto)
+SELECT id, ip, false FROM devices WHERE ip IS NOT NULL AND ip <> ''
+ON CONFLICT (ip) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS logs (
   id          BIGSERIAL PRIMARY KEY,
   adom_id     INTEGER NOT NULL REFERENCES adoms(id) ON DELETE CASCADE,
