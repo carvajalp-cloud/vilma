@@ -14,23 +14,52 @@ export function usageBytesSql(alias = 'l') {
          `FROM logs ${alias} WHERE ${alias}.device_id = d.id)`;
 }
 
-// For one device, delete the OLDEST logs until the estimated storage is within quota.
-// Keeps the newest logs whose cumulative size fits under quota_bytes (FIFO rollover).
+const BATCH = 2000;
+
+// For one device, delete the OLDEST logs so the newest fit within quota.
+// 1) Find the keep-boundary: the oldest log among the newest set that fits the quota.
+// 2) Delete everything older than that boundary, in small batches (short statements),
+//    so we never hold a large lock that would deadlock with live ingestion.
 async function enforceDevice(deviceId, quotaBytes) {
-  const r = await pool.query(
-    `WITH sized AS (
-       SELECT id,
-              sum(${ROW_SIZE_SQL}) OVER (ORDER BY ts DESC, id DESC) AS running
+  const b = await pool.query(
+    `SELECT ts, id FROM (
+       SELECT ts, id, sum(${ROW_SIZE_SQL}) OVER (ORDER BY ts DESC, id DESC) AS running
        FROM logs WHERE device_id = $1
-     )
-     DELETE FROM logs WHERE id IN (SELECT id FROM sized WHERE running > $2)`,
+     ) s
+     WHERE running <= $2
+     ORDER BY ts ASC, id ASC
+     LIMIT 1`,
     [deviceId, quotaBytes]
   );
-  return r.rowCount;
+  // No row fits (quota smaller than a single newest log) or no logs — never mass-delete.
+  if (!b.rows[0]) return 0;
+  const { ts: bts, id: bid } = b.rows[0];
+
+  let totalDeleted = 0;
+  let guard = 0;
+  while (guard++ < 5000) {
+    const r = await pool.query(
+      `DELETE FROM logs WHERE id IN (
+         SELECT id FROM logs
+         WHERE device_id = $1 AND (ts < $2 OR (ts = $2 AND id < $3))
+         ORDER BY ts ASC, id ASC
+         LIMIT ${BATCH}
+       )`,
+      [deviceId, bts, bid]
+    );
+    if (r.rowCount === 0) break;
+    totalDeleted += r.rowCount;
+    await new Promise((res) => setTimeout(res, 100)); // let live ingestion through
+  }
+  return totalDeleted;
 }
+
+let sweeping = false;
 
 // Sweep all devices that have a quota and trim any that exceed it.
 export async function enforceQuotas() {
+  if (sweeping) return 0; // never overlap with an in-flight sweep
+  sweeping = true;
   try {
     const devs = await pool.query(
       'SELECT id, name, quota_bytes FROM devices WHERE quota_bytes IS NOT NULL AND quota_bytes > 0'
@@ -47,6 +76,8 @@ export async function enforceQuotas() {
   } catch (err) {
     console.error('[quota] enforcement error:', err.message);
     return 0;
+  } finally {
+    sweeping = false;
   }
 }
 

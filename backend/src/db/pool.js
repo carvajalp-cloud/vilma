@@ -9,8 +9,11 @@ export const pool = new Pool({
   user: config.db.user,
   password: config.db.password,
   database: config.db.database,
-  max: 10,
+  max: 20,
   idleTimeoutMillis: 30000,
+  // Fail a query fast if the pool is momentarily saturated, rather than hanging the
+  // API forever (which is what made the whole site appear down under syslog load).
+  connectionTimeoutMillis: 8000,
 });
 
 pool.on('error', (err) => {

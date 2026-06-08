@@ -76,8 +76,49 @@ async function getDefaultAdomId(client) {
   return _defaultAdomId;
 }
 
+// --- Ingest concurrency limiter ---------------------------------------------
+// A high-rate syslog source would otherwise spawn one DB connection per packet and
+// exhaust the pool, starving the API. Cap concurrent ingests well below the pool size.
+const MAX_INGEST = 4;
+let activeIngests = 0;
+const ingestQueue = [];
+function acquire() {
+  return new Promise((resolve) => {
+    if (activeIngests < MAX_INGEST) { activeIngests++; resolve(); }
+    else ingestQueue.push(resolve);
+  });
+}
+function releaseSlot() {
+  activeIngests--;
+  if (ingestQueue.length) { activeIngests++; ingestQueue.shift()(); }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// last_seen is throttled per device so a chatty device doesn't update the same row on
+// every single log (the hot-row contention that was deadlocking with inserts).
+const lastSeenAt = new Map();
+const LAST_SEEN_INTERVAL_MS = 15000;
+
 // Persist one parsed log + run alert evaluation. Returns the inserted log row.
 export async function ingestParsedLog(parsed, sourceIp) {
+  await acquire();
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await ingestOnce(parsed, sourceIp);
+      } catch (err) {
+        // Deadlocks are transient — retry a few times with small backoff.
+        if (err.code === '40P01' && attempt < 4) { await sleep(25 * attempt); continue; }
+        throw err;
+      }
+    }
+  } finally {
+    releaseSlot();
+  }
+}
+
+async function ingestOnce(parsed, sourceIp) {
   const client = await pool.connect();
   try {
     const defaultAdomId = await getDefaultAdomId(client);
@@ -102,11 +143,15 @@ export async function ingestParsedLog(parsed, sourceIp) {
     );
     const log = ins.rows[0];
 
-    // Keep device freshness up to date.
-    await client.query(
-      'UPDATE devices SET last_seen = now(), status = $2 WHERE id = $1',
-      [device.id, 'online']
-    );
+    // Keep device freshness up to date — but at most once per interval per device.
+    const now = Date.now();
+    if (now - (lastSeenAt.get(device.id) || 0) > LAST_SEEN_INTERVAL_MS) {
+      lastSeenAt.set(device.id, now);
+      await client.query(
+        'UPDATE devices SET last_seen = now(), status = $2 WHERE id = $1',
+        [device.id, 'online']
+      );
+    }
 
     await evaluateAlerts(client, log);
     return log;
