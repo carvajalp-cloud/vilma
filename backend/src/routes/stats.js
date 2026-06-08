@@ -107,7 +107,7 @@ router.get('/timeline', async (req, res, next) => {
 router.get('/top', async (req, res, next) => {
   try {
     const scope = req.adomScope;
-    const allowed = { src_ip: 'src_ip', dst_ip: 'dst_ip', app: 'app', action: 'action', protocol: 'protocol' };
+    const allowed = { src_ip: 'src_ip', dst_ip: 'dst_ip', app: 'app', action: 'action', protocol: 'protocol', dst_port: 'dst_port', user_name: 'user_name' };
     const dim = allowed[req.query.dim] || 'src_ip';
     const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10) || 10, 1), 50);
     const hours = Math.min(Math.max(parseInt(req.query.hours || '24', 10) || 24, 1), 720);
@@ -120,6 +120,79 @@ router.get('/top', async (req, res, next) => {
       params
     );
     res.json(r.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/stats/insights -> computed analysis: block rate, peak hour, top threat,
+// busiest device, and current-vs-previous-window trends.
+router.get('/insights', async (req, res, next) => {
+  try {
+    const scope = req.adomScope;
+    const hours = Math.min(Math.max(parseInt(req.query.hours || '24', 10) || 24, 1), 720);
+
+    const t = scoped(scope, `WHERE ts > now() - interval '${hours} hours' AND log_type='traffic'`);
+    const traffic = await pool.query(
+      `SELECT count(*) FILTER (WHERE action='accept')::int AS accept,
+              count(*) FILTER (WHERE action='deny')::int AS deny
+       FROM logs ${t.where}`, t.params);
+
+    const p = scoped(scope, `WHERE ts > now() - interval '${hours} hours'`);
+    const peak = await pool.query(
+      `SELECT to_char(date_bin(interval '1 hour', ts, timestamptz 'epoch'),'MM-DD HH24:MI') AS label,
+              count(*)::int AS count
+       FROM logs ${p.where} GROUP BY 1 ORDER BY count DESC LIMIT 1`, p.params);
+
+    const th = scoped(scope, `WHERE ts > now() - interval '${hours} hours' AND log_type='threat'`);
+    const topThreat = await pool.query(
+      `SELECT message AS key, count(*)::int AS count FROM logs ${th.where}
+       GROUP BY message ORDER BY count DESC LIMIT 1`, th.params);
+
+    const tb = scoped(scope, `WHERE ts > now() - interval '${hours} hours' AND action='deny' AND src_ip IS NOT NULL`);
+    const topBlocked = await pool.query(
+      `SELECT src_ip AS key, count(*)::int AS count FROM logs ${tb.where}
+       GROUP BY src_ip ORDER BY count DESC LIMIT 1`, tb.params);
+
+    // Busiest device (visibility predicate inlined because of the join alias).
+    let devWhere = `l.ts > now() - interval '${hours} hours'`;
+    const devParams = [];
+    if (scope != null) {
+      devParams.push(scope);
+      devWhere += ` AND (l.adom_id = $1 OR l.device_id IN (SELECT device_id FROM device_viewers WHERE adom_id = $1))`;
+    }
+    const busiest = await pool.query(
+      `SELECT d.name, count(*)::int AS count FROM logs l JOIN devices d ON d.id = l.device_id
+       WHERE ${devWhere} GROUP BY d.name ORDER BY count DESC LIMIT 1`, devParams);
+
+    // Trend: current window vs the immediately-preceding window of the same length.
+    const tr = scoped(scope, `WHERE ts > now() - interval '${hours * 2} hours'`);
+    const trend = await pool.query(
+      `SELECT
+         count(*) FILTER (WHERE ts > now() - interval '${hours} hours')::int AS cur_logs,
+         count(*) FILTER (WHERE ts <= now() - interval '${hours} hours')::int AS prev_logs,
+         count(*) FILTER (WHERE log_type='threat' AND ts > now() - interval '${hours} hours')::int AS cur_threats,
+         count(*) FILTER (WHERE log_type='threat' AND ts <= now() - interval '${hours} hours')::int AS prev_threats,
+         count(*) FILTER (WHERE sev_level<=2 AND ts > now() - interval '${hours} hours')::int AS cur_crit,
+         count(*) FILTER (WHERE sev_level<=2 AND ts <= now() - interval '${hours} hours')::int AS prev_crit
+       FROM logs ${tr.where}`, tr.params);
+    const tv = trend.rows[0];
+    const pct = (cur, prev) => (prev > 0 ? Math.round(((cur - prev) / prev) * 100) : (cur > 0 ? 100 : 0));
+
+    const accept = traffic.rows[0].accept, deny = traffic.rows[0].deny;
+    res.json({
+      window_hours: hours,
+      traffic: { accept, deny, block_rate: (accept + deny) ? +(deny / (accept + deny)).toFixed(3) : 0 },
+      peak: peak.rows[0] || null,
+      top_threat: topThreat.rows[0] || null,
+      top_blocked_src: topBlocked.rows[0] || null,
+      busiest_device: busiest.rows[0] || null,
+      trend: {
+        logs: { current: tv.cur_logs, previous: tv.prev_logs, pct: pct(tv.cur_logs, tv.prev_logs) },
+        threats: { current: tv.cur_threats, previous: tv.prev_threats, pct: pct(tv.cur_threats, tv.prev_threats) },
+        critical: { current: tv.cur_crit, previous: tv.prev_crit, pct: pct(tv.cur_crit, tv.prev_crit) },
+      },
+    });
   } catch (err) {
     next(err);
   }

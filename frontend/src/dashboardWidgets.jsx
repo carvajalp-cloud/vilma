@@ -8,6 +8,28 @@ import { SevBadge, StatusBadge } from './components/Badges.jsx';
 
 const tip = { contentStyle: { background: '#161b22', border: '1px solid #2d3748' } };
 
+// Rich hover tooltip: shows each series' value, plus % (pie/precomputed) and bytes when present.
+function RichTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div style={{ background: '#0d1117', border: '1px solid #2d3748', borderRadius: 6, padding: '8px 10px', fontSize: 12, minWidth: 140 }}>
+      {label != null && label !== '' && <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>}
+      {payload.map((p, i) => {
+        const d = p.payload || {};
+        const pctVal = p.percent != null ? Math.round(p.percent * 100) : (d.pct != null ? d.pct : null);
+        return (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
+            <span style={{ color: p.color || p.fill || d.color }}>{p.name}</span>
+            <span style={{ fontWeight: 600 }}>
+              {fmtNum(p.value)}{pctVal != null ? ` · ${pctVal}%` : ''}{d.bytes ? ` · ${fmtBytes(d.bytes)}` : ''}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // --- Data sources: a widget declares which of these it `needs`, and the dashboard
 //     fetches only the union needed by the widgets currently on the board. ---
 export const SOURCES = {
@@ -19,6 +41,8 @@ export const SOURCES = {
   'top:app':      (h) => api.get('/stats/top', { params: { dim: 'app', hours: h, limit: 8 } }).then((r) => r.data),
   'top:action':   (h) => api.get('/stats/top', { params: { dim: 'action', hours: h, limit: 6 } }).then((r) => r.data),
   'top:protocol': (h) => api.get('/stats/top', { params: { dim: 'protocol', hours: h, limit: 6 } }).then((r) => r.data),
+  'top:dst_port': (h) => api.get('/stats/top', { params: { dim: 'dst_port', hours: h, limit: 8 } }).then((r) => r.data),
+  insights:       (h) => api.get('/stats/insights', { params: { hours: h } }).then((r) => r.data),
   threats:        (h) => api.get('/logs', { params: { log_type: 'threat', hours: h, limit: 8 } }).then((r) => r.data.rows),
   events:         () => api.get('/events', { params: { limit: 8 } }).then((r) => r.data.rows),
   devices:        () => api.get('/devices').then((r) => r.data),
@@ -43,7 +67,7 @@ function BarTop({ data, color, vertical }) {
           <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
           <XAxis type="number" stroke="#8b95a5" fontSize={11} />
           <YAxis type="category" dataKey="key" stroke="#8b95a5" fontSize={11} width={110} />
-          <Tooltip {...tip} />
+          <Tooltip content={<RichTooltip />} />
           <Bar dataKey="count" fill={color} radius={[0, 4, 4, 0]} />
         </BarChart>
       </ResponsiveContainer>
@@ -55,7 +79,7 @@ function BarTop({ data, color, vertical }) {
         <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
         <XAxis dataKey="key" stroke="#8b95a5" fontSize={11} />
         <YAxis stroke="#8b95a5" fontSize={11} />
-        <Tooltip {...tip} />
+        <Tooltip content={<RichTooltip />} />
         <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
@@ -70,7 +94,7 @@ function PieTop({ data, nameKey = 'key' }) {
         <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} label>
           {data.map((e, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
         </Pie>
-        <Tooltip {...tip} />
+        <Tooltip content={<RichTooltip />} />
         <Legend />
       </PieChart>
     </ResponsiveContainer>
@@ -91,6 +115,22 @@ function severityPie(severity) {
 function toPie(rows) {
   return (rows || []).map((r) => ({ name: r.key || '—', value: r.count }));
 }
+
+// Per-severity colors (Fortinet 0..7: emergency..debug).
+const SEV_COLORS = ['#f85149', '#f85149', '#f85149', '#ff7b72', '#d29922', '#2f81f7', '#8b95a5', '#6e7681'];
+function severityBars(severity) {
+  const rows = SEV_NAMES.map((name, i) => ({
+    name, sev: i, color: SEV_COLORS[i] || '#8b95a5',
+    count: (severity || []).filter((r) => r.sev_level === i).reduce((a, b) => a + b.count, 0),
+  }));
+  const total = rows.reduce((a, b) => a + b.count, 0) || 1;
+  rows.forEach((d) => { d.pct = Math.round((d.count / total) * 100); });
+  return rows.filter((d) => d.count > 0);
+}
+
+const PORT_NAMES = { 80: 'HTTP', 443: 'HTTPS', 22: 'SSH', 53: 'DNS', 3389: 'RDP', 445: 'SMB', 25: 'SMTP', 587: 'SMTP', 123: 'NTP', 21: 'FTP', 110: 'POP3', 143: 'IMAP', 8080: 'HTTP-alt', 8443: 'HTTPS-alt', 3306: 'MySQL', 5432: 'PgSQL', 1194: 'OpenVPN', 500: 'IKE', 4500: 'IPsec' };
+const portLabel = (port) => (PORT_NAMES[port] ? `${port} ${PORT_NAMES[port]}` : String(port));
+const portData = (rows) => (rows || []).map((r) => ({ ...r, key: portLabel(r.key) }));
 
 // --- Widget catalog. type -> definition. ---
 // span = grid columns (1..4). needs = data source keys. render(ctx) => JSX.
@@ -117,7 +157,7 @@ export const WIDGETS = {
           <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
           <XAxis dataKey="label" stroke="#8b95a5" fontSize={11} />
           <YAxis stroke="#8b95a5" fontSize={11} />
-          <Tooltip {...tip} /><Legend />
+          <Tooltip content={<RichTooltip />} /><Legend />
           <Area type="monotone" dataKey="traffic" stroke="#2f81f7" fill="url(#wgT)" />
           <Area type="monotone" dataKey="threat" stroke="#f85149" fill="url(#wgX)" />
           <Area type="monotone" dataKey="event" stroke="#a371f7" fillOpacity={0} />
@@ -132,6 +172,94 @@ export const WIDGETS = {
   top_app:      { title: 'Top Applications', category: 'Chart', span: 2, needs: ['top:app'], render: (c) => <BarTop data={c['top:app']} color="#a371f7" /> },
   top_action:   { title: 'Actions', category: 'Chart', span: 2, needs: ['top:action'], render: (c) => <PieTop data={toPie(c['top:action'])} /> },
   top_protocol: { title: 'Protocols', category: 'Chart', span: 2, needs: ['top:protocol'], render: (c) => <PieTop data={toPie(c['top:protocol'])} /> },
+  top_dst_port: { title: 'Top Destination Ports', category: 'Chart', span: 2, needs: ['top:dst_port'], render: (c) => <BarTop data={portData(c['top:dst_port'])} color="#d29922" vertical /> },
+
+  // Analysis
+  severity_breakdown: {
+    title: 'Severity Breakdown', category: 'Analysis', span: 2, needs: ['severity'],
+    render: (c) => {
+      const data = severityBars(c.severity);
+      if (!data.length) return <Empty />;
+      return (
+        <ResponsiveContainer width="100%" height={230}>
+          <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" horizontal={false} />
+            <XAxis type="number" stroke="#8b95a5" fontSize={11} />
+            <YAxis type="category" dataKey="name" stroke="#8b95a5" fontSize={11} width={72} />
+            <Tooltip content={<RichTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+            <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+              {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    },
+  },
+  allowed_blocked: {
+    title: 'Allowed vs Blocked', category: 'Analysis', span: 2, needs: ['insights'],
+    render: (c) => {
+      const tr = c.insights?.traffic;
+      if (!tr || (tr.accept + tr.deny) === 0) return <Empty />;
+      const total = tr.accept + tr.deny;
+      const data = [
+        { name: 'Allowed', value: tr.accept, pct: Math.round((tr.accept / total) * 100), color: '#3fb950' },
+        { name: 'Blocked', value: tr.deny, pct: Math.round((tr.deny / total) * 100), color: '#f85149' },
+      ];
+      return (
+        <div style={{ position: 'relative' }}>
+          <ResponsiveContainer width="100%" height={230}>
+            <PieChart>
+              <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={85}>
+                {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Pie>
+              <Tooltip content={<RichTooltip />} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+          <div style={{ position: 'absolute', top: '40%', left: 0, right: 0, textAlign: 'center', pointerEvents: 'none' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: tr.block_rate > 0.3 ? 'var(--red)' : 'var(--text)' }}>{Math.round(tr.block_rate * 100)}%</div>
+            <div className="muted" style={{ fontSize: 11 }}>blocked</div>
+          </div>
+        </div>
+      );
+    },
+  },
+  insights: {
+    title: 'Insights & Trends', category: 'Analysis', span: 2, needs: ['insights'],
+    render: (c) => {
+      const ins = c.insights;
+      if (!ins) return <span className="muted">Loading…</span>;
+      const Trend = ({ t, invert }) => {
+        if (!t) return null;
+        const up = t.pct > 0, down = t.pct < 0;
+        const color = t.pct === 0 ? 'var(--text-dim)' : (invert ? (up ? 'var(--red)' : 'var(--green)') : 'var(--accent-2)');
+        return <span style={{ color, fontSize: 11 }}>{up ? '▲' : down ? '▼' : '■'} {Math.abs(t.pct)}%</span>;
+      };
+      const Row = ({ label, value, title }) => (
+        <div className="flex" title={title} style={{ justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--border)', cursor: 'default' }}>
+          <span className="muted" style={{ fontSize: 12 }}>{label}</span>
+          <span style={{ fontSize: 13, fontWeight: 600, maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+        </div>
+      );
+      return (
+        <div>
+          <Row label="Block rate"
+               title={`${ins.traffic.deny} blocked of ${ins.traffic.accept + ins.traffic.deny} traffic sessions`}
+               value={<span style={{ color: ins.traffic.block_rate > 0.3 ? 'var(--red)' : undefined }}>{Math.round(ins.traffic.block_rate * 100)}% <span className="muted">({fmtNum(ins.traffic.deny)})</span></span>} />
+          <Row label="Peak activity" title="Hour with the most log volume" value={ins.peak ? `${ins.peak.label} (${fmtNum(ins.peak.count)})` : '—'} />
+          <Row label="Top threat" title={ins.top_threat?.key || 'No threats in window'} value={ins.top_threat ? `${ins.top_threat.key} (${ins.top_threat.count})` : '—'} />
+          <Row label="Top blocked source" title="Source IP with the most denied sessions" value={ins.top_blocked_src ? `${ins.top_blocked_src.key} (${ins.top_blocked_src.count})` : '—'} />
+          <Row label="Busiest device" title="Device producing the most logs" value={ins.busiest_device ? `${ins.busiest_device.name} (${fmtNum(ins.busiest_device.count)})` : '—'} />
+          <div className="flex" style={{ justifyContent: 'space-between', paddingTop: 8, gap: 6 }}>
+            <span className="pill" title={`Logs: now ${ins.trend.logs.current} vs previous ${ins.trend.logs.previous}`} style={{ fontSize: 11 }}>Logs <Trend t={ins.trend.logs} /></span>
+            <span className="pill" title={`Threats: now ${ins.trend.threats.current} vs previous ${ins.trend.threats.previous}`} style={{ fontSize: 11 }}>Threats <Trend t={ins.trend.threats} invert /></span>
+            <span className="pill" title={`Critical: now ${ins.trend.critical.current} vs previous ${ins.trend.critical.previous}`} style={{ fontSize: 11 }}>Critical <Trend t={ins.trend.critical} invert /></span>
+          </div>
+          <div className="muted" style={{ fontSize: 10, marginTop: 6 }}>▲/▼ vs previous {ins.window_hours}h · hover any row for detail</div>
+        </div>
+      );
+    },
+  },
 
   // Tables
   recent_threats: {
@@ -172,10 +300,13 @@ export const WIDGETS = {
   },
 };
 
-// Default board shown to a brand-new user (mirrors the original fixed dashboard).
+// Default board — KPIs, trend timeline, analysis panels, then top-talkers and recent activity.
 export const DEFAULT_LAYOUT = [
   'kpi_total', 'kpi_threats', 'kpi_critical', 'kpi_events',
   'kpi_bandwidth', 'kpi_devices',
   'timeline',
-  'severity', 'top_src', 'top_app',
+  'insights', 'severity_breakdown',
+  'allowed_blocked', 'top_src',
+  'top_dst_port', 'top_app',
+  'recent_threats', 'recent_events',
 ];

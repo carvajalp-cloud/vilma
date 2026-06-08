@@ -4,7 +4,7 @@ import { fmtNum } from '../utils.js';
 import { SOURCES, WIDGETS, DEFAULT_LAYOUT } from '../dashboardWidgets.jsx';
 
 const uid = () => Math.random().toString(36).slice(2, 9);
-const STORAGE_KEY = 'faz_dashboard_v1';
+const STORAGE_KEY = 'faz_dashboard_v2';
 
 // Layout persists per user so different logins keep their own board.
 function loadLayout(userId) {
@@ -148,8 +148,10 @@ export default function Dashboard() {
   );
 }
 
+const CAT_TITLES = { KPI: 'KPI Cards', Analysis: 'Analysis', Chart: 'Charts', Table: 'Tables' };
+
 function WidgetLibrary({ onAdd, onClose }) {
-  const cats = ['KPI', 'Chart', 'Table'];
+  const cats = ['KPI', 'Analysis', 'Chart', 'Table'];
   const byCat = (cat) => Object.entries(WIDGETS).filter(([, d]) => d.category === cat);
   const descFor = (type) => DESCRIPTIONS[type] || '';
   return (
@@ -162,7 +164,7 @@ function WidgetLibrary({ onAdd, onClose }) {
         <p className="muted" style={{ fontSize: 12 }}>Click a widget to add it to your dashboard. You can add the same widget more than once.</p>
         {cats.map((cat) => (
           <div key={cat}>
-            <div className="lib-section-title">{cat === 'KPI' ? 'KPI Cards' : cat === 'Chart' ? 'Charts' : 'Tables'}</div>
+            <div className="lib-section-title">{CAT_TITLES[cat] || cat}</div>
             <div className="lib-grid">
               {byCat(cat).map(([type, d]) => (
                 <button key={type} className="lib-item" onClick={() => onAdd(type)}>
@@ -188,6 +190,10 @@ const DESCRIPTIONS = {
   kpi_devices: 'Online vs total reporting devices',
   timeline: 'Stacked log volume by type over time',
   severity: 'Pie of logs by severity level',
+  severity_breakdown: 'All severity levels with counts, %, and colors',
+  allowed_blocked: 'Allowed vs blocked traffic with block-rate %',
+  top_dst_port: 'Most-targeted destination ports (with service names)',
+  insights: 'Key analysis: block rate, peak hour, top threat, busiest device + trends',
   top_src: 'Bar chart of busiest source IPs',
   top_dst: 'Bar chart of busiest destination IPs',
   top_app: 'Bar chart of top applications',
