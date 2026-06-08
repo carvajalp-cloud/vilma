@@ -1,10 +1,25 @@
 import express from 'express';
 import pool from '../db/pool.js';
-import { authenticate, resolveAdomScope, requireRole } from '../middleware/auth.js';
+import { authenticate, resolveAdomScope, requireRole, deviceRowVisibility } from '../middleware/auth.js';
 import { clearDeviceCache } from '../services/ingest.js';
 import { usageBytesSql, enforceQuotas } from '../services/quota.js';
 
 const router = express.Router();
+
+// Replace a device's extra "viewer" customers (excludes the owner). Admin-only operation.
+async function setViewers(client, deviceId, ownerAdomId, viewerIds) {
+  const ids = [...new Set((viewerIds || [])
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0 && n !== Number(ownerAdomId)))];
+  await client.query('DELETE FROM device_viewers WHERE device_id = $1', [deviceId]);
+  for (const aid of ids) {
+    await client.query(
+      'INSERT INTO device_viewers (device_id, adom_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [deviceId, aid]
+    );
+  }
+  return ids;
+}
 
 // Parse an incoming quota into a non-negative BIGINT, or null (unlimited).
 function parseQuota(v) {
@@ -38,12 +53,14 @@ async function setDeviceIps(client, deviceId, ips) {
 router.get('/', authenticate, resolveAdomScope, async (req, res, next) => {
   try {
     const scope = req.adomScope;
-    const params = [];
-    let where = '';
-    if (scope != null) { params.push(scope); where = 'WHERE d.adom_id = $1'; }
+    const vis = deviceRowVisibility(scope, 'd', 1);
+    const params = [...vis.params];
+    const where = vis.clause ? `WHERE ${vis.clause}` : '';
     const r = await pool.query(
       `SELECT d.*, a.name AS adom_name,
               COALESCE(array_agg(di.ip ORDER BY di.ip) FILTER (WHERE di.ip IS NOT NULL), '{}') AS ips,
+              (SELECT COALESCE(array_agg(dv.adom_id), '{}') FROM device_viewers dv WHERE dv.device_id = d.id) AS viewer_adom_ids,
+              (SELECT COALESCE(array_agg(av.name ORDER BY av.name), '{}') FROM device_viewers dv JOIN adoms av ON av.id = dv.adom_id WHERE dv.device_id = d.id) AS viewer_names,
               ${usageBytesSql('l')} AS usage_bytes,
               (SELECT count(*)::int FROM logs l WHERE l.device_id = d.id AND l.ts > now() - interval '24 hours') AS logs_24h
        FROM devices d
@@ -54,7 +71,9 @@ router.get('/', authenticate, resolveAdomScope, async (req, res, next) => {
        ORDER BY d.name`,
       params
     );
-    res.json(r.rows);
+    // Flag rows that are shared INTO the current scope (owned elsewhere) so the UI can mark them.
+    const rows = r.rows.map((d) => ({ ...d, shared_in: scope != null && d.adom_id !== scope }));
+    res.json(rows);
   } catch (err) {
     next(err);
   }
@@ -83,9 +102,14 @@ router.post('/', authenticate, resolveAdomScope, requireRole('admin', 'analyst')
     );
     const device = r.rows[0];
     await setDeviceIps(client, device.id, ips);
+    // Optional viewer customers (admin only).
+    let viewers = [];
+    if (req.user.role === 'admin' && Array.isArray(req.body.viewer_adom_ids)) {
+      viewers = await setViewers(client, device.id, adomId, req.body.viewer_adom_ids);
+    }
     await client.query('COMMIT');
     clearDeviceCache(); // so ingest picks up the new IP mappings immediately
-    res.status(201).json({ ...device, ips });
+    res.status(201).json({ ...device, ips, viewer_adom_ids: viewers });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') return res.status(409).json({ error: 'A device with this devid already exists in the customer' });
@@ -139,11 +163,29 @@ router.put('/:id', authenticate, resolveAdomScope, requireRole('admin', 'analyst
       quotaChanged = true;
     }
 
+    // Owner reassignment + viewer customers are cross-customer operations — admins only.
+    if (req.user.role === 'admin') {
+      // Change of owning customer: migrate the device's logs + events to the new owner.
+      const newOwner = req.body.adom_id != null ? parseInt(req.body.adom_id, 10) : null;
+      if (newOwner && newOwner !== device.adom_id) {
+        await client.query('UPDATE logs SET adom_id = $2 WHERE device_id = $1', [id, newOwner]);
+        await client.query('UPDATE events SET adom_id = $2 WHERE device_id = $1', [id, newOwner]);
+        await client.query('UPDATE devices SET adom_id = $2 WHERE id = $1', [id, newOwner]);
+        await client.query('DELETE FROM device_viewers WHERE device_id = $1 AND adom_id = $2', [id, newOwner]);
+        device.adom_id = newOwner;
+      }
+      if (Array.isArray(req.body.viewer_adom_ids)) {
+        await setViewers(client, id, device.adom_id, req.body.viewer_adom_ids);
+      }
+    }
+
     await client.query('COMMIT');
     clearDeviceCache();
     // A newly-lowered quota should trim right away rather than waiting for the sweep.
     if (quotaChanged) enforceQuotas().catch(() => {});
-    res.json({ ...device, ips });
+
+    const vrow = await pool.query('SELECT adom_id FROM device_viewers WHERE device_id = $1', [id]);
+    res.json({ ...device, ips, viewer_adom_ids: vrow.rows.map((x) => x.adom_id) });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') return res.status(409).json({ error: 'A device with this devid already exists in the customer' });

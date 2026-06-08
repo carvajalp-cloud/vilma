@@ -63,6 +63,15 @@ CREATE TABLE IF NOT EXISTS device_ips (
 );
 CREATE INDEX IF NOT EXISTS idx_device_ips_device ON device_ips(device_id);
 
+-- A device is OWNED by one customer (devices.adom_id) but may be shared for read-only
+-- visibility with additional customers listed here.
+CREATE TABLE IF NOT EXISTS device_viewers (
+  device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  adom_id   INTEGER NOT NULL REFERENCES adoms(id) ON DELETE CASCADE,
+  PRIMARY KEY (device_id, adom_id)
+);
+CREATE INDEX IF NOT EXISTS idx_device_viewers_adom ON device_viewers(adom_id);
+
 -- Backfill from the legacy single ip column (idempotent).
 INSERT INTO device_ips (device_id, ip, auto)
 SELECT id, ip, false FROM devices WHERE ip IS NOT NULL AND ip <> ''

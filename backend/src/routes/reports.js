@@ -8,7 +8,10 @@ const router = express.Router();
 async function buildReport(type, adomId, hours) {
   const scopeParams = [];
   let scopeClause = `ts > now() - interval '${hours} hours'`;
-  if (adomId != null) { scopeParams.push(adomId); scopeClause += ` AND adom_id = $1`; }
+  if (adomId != null) {
+    scopeParams.push(adomId);
+    scopeClause += ` AND (adom_id = $1 OR device_id IN (SELECT device_id FROM device_viewers WHERE adom_id = $1))`;
+  }
 
   switch (type) {
     case 'traffic_summary': {
@@ -47,7 +50,10 @@ async function buildReport(type, adomId, hours) {
     case 'event_summary': {
       const evParams = [];
       let evClause = `ts > now() - interval '${hours} hours'`;
-      if (adomId != null) { evParams.push(adomId); evClause += ` AND adom_id = $1`; }
+      if (adomId != null) {
+        evParams.push(adomId);
+        evClause += ` AND (adom_id = $1 OR device_id IN (SELECT device_id FROM device_viewers WHERE adom_id = $1))`;
+      }
       const r = await pool.query(
         `SELECT category, status, count(*)::int AS count
          FROM events WHERE ${evClause} GROUP BY category, status ORDER BY count DESC`,

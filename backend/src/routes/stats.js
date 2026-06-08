@@ -6,15 +6,28 @@ import { getSyslogStats } from '../services/syslog.js';
 const router = express.Router();
 router.use(authenticate, resolveAdomScope);
 
-// Helper: append "WHERE adom_id = $1" when scoped.
+// Helper for logs/events: owned by scope OR the row's device is shared with scope.
 function scoped(scope, baseWhere = '') {
   const params = [];
   let where = baseWhere;
   if (scope != null) {
     params.push(scope);
-    where += (where ? ' AND ' : ' WHERE ') + `adom_id = $${params.length}`;
-  } else if (baseWhere) {
-    where = baseWhere;
+    const i = params.length;
+    const pred = `(adom_id = $${i} OR device_id IN (SELECT device_id FROM device_viewers WHERE adom_id = $${i}))`;
+    where += (where ? ' AND ' : ' WHERE ') + pred;
+  }
+  return { where, params };
+}
+
+// Helper for the devices table: owned by scope OR shared to scope.
+function scopedDevice(scope, baseWhere = '') {
+  const params = [];
+  let where = baseWhere;
+  if (scope != null) {
+    params.push(scope);
+    const i = params.length;
+    const pred = `(adom_id = $${i} OR EXISTS (SELECT 1 FROM device_viewers dv WHERE dv.device_id = devices.id AND dv.adom_id = $${i}))`;
+    where += (where ? ' AND ' : ' WHERE ') + pred;
   }
   return { where, params };
 }
@@ -45,7 +58,7 @@ router.get('/summary', async (req, res, next) => {
       evWhere.params
     );
 
-    const devWhere = scoped(scope, '');
+    const devWhere = scopedDevice(scope, '');
     const devices = await pool.query(
       `SELECT count(*)::int AS total,
               count(*) FILTER (WHERE status='online')::int AS online

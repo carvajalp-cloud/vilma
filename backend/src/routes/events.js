@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../db/pool.js';
-import { authenticate, resolveAdomScope, requireRole } from '../middleware/auth.js';
+import { authenticate, resolveAdomScope, requireRole, deviceVisibility } from '../middleware/auth.js';
 import { invalidateRuleCache } from '../services/alerting.js';
 
 const router = express.Router();
@@ -14,7 +14,7 @@ router.get('/', authenticate, resolveAdomScope, async (req, res, next) => {
     const scope = req.adomScope;
     const params = [];
     const conds = [];
-    if (scope != null) { params.push(scope); conds.push(`e.adom_id = $${params.length}`); }
+    if (scope != null) { params.push(scope); conds.push(deviceVisibility(scope, 'e', params.length).clause); }
     if (req.query.status) { params.push(req.query.status); conds.push(`e.status = $${params.length}`); }
     if (req.query.category) { params.push(req.query.category); conds.push(`e.category = $${params.length}`); }
     if (req.query.max_sev) { params.push(parseInt(req.query.max_sev, 10)); conds.push(`e.sev_level <= $${params.length}`); }

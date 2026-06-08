@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../db/pool.js';
-import { authenticate, resolveAdomScope } from '../middleware/auth.js';
+import { authenticate, resolveAdomScope, deviceVisibility } from '../middleware/auth.js';
 import { parseFortiLog } from '../services/fortiParser.js';
 import { ingestParsedLog } from '../services/ingest.js';
 
@@ -13,7 +13,7 @@ router.get('/', authenticate, resolveAdomScope, async (req, res, next) => {
     const params = [];
     const conds = [];
 
-    if (scope != null) { params.push(scope); conds.push(`l.adom_id = $${params.length}`); }
+    if (scope != null) { params.push(scope); conds.push(deviceVisibility(scope, 'l', params.length).clause); }
 
     const { log_type, level, action, src_ip, dst_ip, device_id, q, hours } = req.query;
     if (log_type) { params.push(log_type); conds.push(`l.log_type = $${params.length}`); }
@@ -60,7 +60,7 @@ router.get('/:id', authenticate, resolveAdomScope, async (req, res, next) => {
     const scope = req.adomScope;
     const params = [parseInt(req.params.id, 10)];
     let where = 'WHERE l.id = $1';
-    if (scope != null) { params.push(scope); where += ` AND l.adom_id = $2`; }
+    if (scope != null) { params.push(scope); where += ` AND ${deviceVisibility(scope, 'l', 2).clause}`; }
     const r = await pool.query(
       `SELECT l.*, d.name AS device_name FROM logs l
        LEFT JOIN devices d ON d.id = l.device_id ${where}`,

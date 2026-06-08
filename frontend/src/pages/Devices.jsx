@@ -85,17 +85,27 @@ export default function Devices() {
                 </td>
                 <td className="mono">{d.devid || '—'}</td>
                 <td>{d.type}</td>
-                <td>{d.adom_name}</td>
+                <td>
+                  {d.adom_name}
+                  {d.shared_in && <span className="badge sev-5" style={{ marginLeft: 6 }}>shared in</span>}
+                  {d.viewer_names && d.viewer_names.length > 0 && (
+                    <div className="muted" style={{ fontSize: 11 }}>shared with: {d.viewer_names.join(', ')}</div>
+                  )}
+                </td>
                 <td><span className={`badge ${d.status}`}>{d.status}</span></td>
                 <td><StorageCell usage={d.usage_bytes} quota={d.quota_bytes} /></td>
                 <td className="mono">{d.last_seen ? fmtTime(d.last_seen) : 'never'}</td>
                 <td>{fmtNum(d.logs_24h)}</td>
                 {canManage && (
                   <td>
-                    <div className="flex">
-                      <button className="ghost" onClick={() => setModal({ mode: 'edit', device: { ...BLANK, ...d, ips: d.ips || [] } })}>Edit</button>
-                      {user?.role === 'admin' && <button className="ghost" onClick={() => del(d.id)}>Delete</button>}
-                    </div>
+                    {d.shared_in ? (
+                      <span className="muted" style={{ fontSize: 12 }}>view-only</span>
+                    ) : (
+                      <div className="flex">
+                        <button className="ghost" onClick={() => setModal({ mode: 'edit', device: { ...BLANK, ...d, ips: d.ips || [] } })}>Edit</button>
+                        {user?.role === 'admin' && <button className="ghost" onClick={() => del(d.id)}>Delete</button>}
+                      </div>
+                    )}
                   </td>
                 )}
               </tr>
@@ -129,9 +139,12 @@ function DeviceForm({ mode, device, adoms, isAdmin, onClose, onSaved }) {
   const initQuota = bytesToQuota(device.quota_bytes);
   const [quotaValue, setQuotaValue] = useState(initQuota.value);
   const [quotaUnit, setQuotaUnit] = useState(initQuota.unit);
+  const [viewerIds, setViewerIds] = useState(device.viewer_adom_ids || []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const toggleViewer = (id) =>
+    setViewerIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
 
   const addIp = () => {
     const ip = ipInput.trim();
@@ -151,12 +164,13 @@ function DeviceForm({ mode, device, adoms, isAdmin, onClose, onSaved }) {
         type: form.type, status: form.status, ips: form.ips,
         quota_bytes: quotaToBytes(quotaValue, quotaUnit),
       };
-      if (mode === 'create') {
-        if (isAdmin) body.adom_id = form.adom_id;
-        await api.post('/devices', body);
-      } else {
-        await api.put(`/devices/${form.id}`, body);
+      // Owner + viewer customers are admin-only (cross-customer) assignments.
+      if (isAdmin) {
+        body.adom_id = form.adom_id;
+        body.viewer_adom_ids = viewerIds.filter((id) => String(id) !== String(form.adom_id));
       }
+      if (mode === 'create') await api.post('/devices', body);
+      else await api.put(`/devices/${form.id}`, body);
       onSaved();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to save');
@@ -244,13 +258,32 @@ function DeviceForm({ mode, device, adoms, isAdmin, onClose, onSaved }) {
           </div>
         )}
 
-        {mode === 'create' && isAdmin && (
-          <div className="field" style={{ marginTop: 14 }}><label>Customer *</label>
-            <select value={form.adom_id} onChange={set('adom_id')} required>
-              <option value="">Select customer…</option>
-              {adoms.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
+        {isAdmin && (
+          <>
+            <div className="field" style={{ marginTop: 14 }}><label>Owner customer *</label>
+              <select value={form.adom_id || ''} onChange={set('adom_id')} required>
+                <option value="">Select customer…</option>
+                {adoms.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              {mode === 'edit' && (
+                <span className="muted" style={{ fontSize: 11 }}>Changing the owner moves this device's logs &amp; events to the new customer.</span>
+              )}
+            </div>
+            <div className="field">
+              <label>Also visible to <span className="muted">(viewer customers — read-only)</span></label>
+              <div style={{ maxHeight: 140, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 6, padding: 8 }}>
+                {adoms.filter((a) => String(a.id) !== String(form.adom_id)).map((a) => (
+                  <label key={a.id} className="flex" style={{ padding: '3px 0', cursor: 'pointer' }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={viewerIds.includes(a.id)} onChange={() => toggleViewer(a.id)} />
+                    {a.name}
+                  </label>
+                ))}
+                {adoms.filter((a) => String(a.id) !== String(form.adom_id)).length === 0 &&
+                  <span className="muted" style={{ fontSize: 12 }}>No other customers to share with.</span>}
+              </div>
+              <span className="muted" style={{ fontSize: 11 }}>These customers can see this device and its logs, but cannot edit it.</span>
+            </div>
+          </>
         )}
 
         <div className="right flex" style={{ justifyContent: 'flex-end', marginTop: 16 }}>

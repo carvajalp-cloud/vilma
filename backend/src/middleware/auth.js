@@ -64,3 +64,25 @@ export function adomFilter(scope, startIndex = 1) {
   if (scope == null) return { clause: '', params: [], nextIndex: startIndex };
   return { clause: `adom_id = $${startIndex}`, params: [scope], nextIndex: startIndex + 1 };
 }
+
+// Visibility predicate for device-bound rows (logs / events): the row is visible to
+// `scope` if it's owned by scope OR its device is shared with scope (device_viewers).
+// The single `scope` param is referenced twice via the same placeholder $idx.
+// scope === null  => '' (admin sees everything). Pass the alias of the logs/events table.
+export function deviceVisibility(scope, alias, idx) {
+  if (scope == null) return { clause: '', params: [] };
+  const a = alias ? `${alias}.` : '';
+  return {
+    clause: `(${a}adom_id = $${idx} OR ${a}device_id IN (SELECT device_id FROM device_viewers WHERE adom_id = $${idx}))`,
+    params: [scope],
+  };
+}
+
+// Visibility predicate for the devices table itself: owned by scope OR shared to scope.
+export function deviceRowVisibility(scope, alias, idx) {
+  if (scope == null) return { clause: '', params: [] };
+  return {
+    clause: `(${alias}.adom_id = $${idx} OR EXISTS (SELECT 1 FROM device_viewers dv WHERE dv.device_id = ${alias}.id AND dv.adom_id = $${idx}))`,
+    params: [scope],
+  };
+}
