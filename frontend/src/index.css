@@ -114,6 +114,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .field input, .field select { width: 100%; }
 .error-msg { color: var(--red); font-size: 13px; margin-bottom: 10px; }
 .hint { color: var(--text-dim); font-size: 12px; margin-top: 12px; line-height: 1.6; }
+.login-logo { display: block; width: 72px; height: auto; margin: 4px auto 10px; }
+.login-card .brand { justify-content: center; border: none; font-size: 26px; margin-bottom: 2px; }
 .login-tagline { text-align: center; color: var(--text-dim); font-size: 13px; margin: -2px 0 18px; letter-spacing: .3px; }
 .login-vendor { text-align: center; color: var(--text-dim); font-size: 11px; margin-top: 18px; letter-spacing: 2px; text-transform: uppercase; }
 

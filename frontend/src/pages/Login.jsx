@@ -28,7 +28,8 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <div className="card login-card">
-        <div className="brand"><span className="logo">◆</span> Vilma</div>
+        <img src="/vijor-logo.png" alt="Vijor Networks" className="login-logo" />
+        <div className="brand">Vilma</div>
         <div className="login-tagline">Log Analyzer for Networks</div>
         <form onSubmit={submit}>
           {error && <div className="error-msg">{error}</div>}
