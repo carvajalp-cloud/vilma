@@ -54,6 +54,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -64,7 +67,8 @@ jobs:
           envs: GHCR_USER,GHCR_TOKEN
           script: |
             set -e
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            # Non-fatal: images may be public (pull works without login).
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || echo "ghcr login skipped"
             cd /opt/vilma
             # Wait for cloud-init bootstrap to finish on a brand-new VM.
             for i in $(seq 1 30); do [ -f .bootstrap-complete ] && break; echo "waiting for bootstrap..."; sleep 5; done
