@@ -4,7 +4,7 @@ import { fmtNum } from '../utils.js';
 import { SOURCES, WIDGETS, DEFAULT_LAYOUT } from '../dashboardWidgets.jsx';
 
 const uid = () => Math.random().toString(36).slice(2, 9);
-const STORAGE_KEY = 'faz_dashboard_v2';
+const STORAGE_KEY = 'faz_dashboard_v3';
 
 // Layout persists per user so different logins keep their own board.
 function loadLayout(userId) {
@@ -194,6 +194,7 @@ const DESCRIPTIONS = {
   allowed_blocked: 'Allowed vs blocked traffic with block-rate %',
   top_dst_port: 'Most-targeted destination ports (with service names)',
   insights: 'Key analysis: block rate, peak hour, top threat, busiest device + trends',
+  bandwidth_devices: 'Per-device incoming vs outgoing bandwidth (scrollable)',
   top_src: 'Bar chart of busiest source IPs',
   top_dst: 'Bar chart of busiest destination IPs',
   top_app: 'Bar chart of top applications',

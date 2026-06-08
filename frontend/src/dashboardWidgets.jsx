@@ -43,6 +43,7 @@ export const SOURCES = {
   'top:protocol': (h) => api.get('/stats/top', { params: { dim: 'protocol', hours: h, limit: 6 } }).then((r) => r.data),
   'top:dst_port': (h) => api.get('/stats/top', { params: { dim: 'dst_port', hours: h, limit: 8 } }).then((r) => r.data),
   insights:       (h) => api.get('/stats/insights', { params: { hours: h } }).then((r) => r.data),
+  bandwidth:      (h) => api.get('/stats/bandwidth', { params: { hours: h } }).then((r) => r.data),
   threats:        (h) => api.get('/logs', { params: { log_type: 'threat', hours: h, limit: 8 } }).then((r) => r.data.rows),
   events:         () => api.get('/events', { params: { limit: 8 } }).then((r) => r.data.rows),
   devices:        () => api.get('/devices').then((r) => r.data),
@@ -175,6 +176,42 @@ export const WIDGETS = {
   top_dst_port: { title: 'Top Destination Ports', category: 'Chart', span: 2, needs: ['top:dst_port'], render: (c) => <BarTop data={portData(c['top:dst_port'])} color="#d29922" vertical /> },
 
   // Analysis
+  bandwidth_devices: {
+    title: 'Bandwidth by Device', category: 'Analysis', span: 2, needs: ['bandwidth'],
+    render: (c) => {
+      const rows = (c.bandwidth || []).map((r) => ({
+        name: r.name, recv: Number(r.recv), sent: Number(r.sent), total: Number(r.recv) + Number(r.sent),
+      }));
+      if (!rows.length) return <Empty />;
+      const totalIn = rows.reduce((a, b) => a + b.recv, 0);
+      const totalOut = rows.reduce((a, b) => a + b.sent, 0);
+      const max = Math.max(...rows.map((d) => d.total), 1);
+      return (
+        <div>
+          <div className="flex" style={{ justifyContent: 'space-between', marginBottom: 8, fontSize: 12, fontWeight: 600 }}>
+            <span style={{ color: 'var(--green)' }}>↓ In {fmtBytes(totalIn)}</span>
+            <span style={{ color: 'var(--accent-2)' }}>↑ Out {fmtBytes(totalOut)}</span>
+          </div>
+          <div style={{ overflow: 'auto', maxHeight: 200 }}>
+            {rows.map((d, i) => (
+              <div key={i} title={`${d.name}\n↓ in: ${fmtBytes(d.recv)}\n↑ out: ${fmtBytes(d.sent)}\ntotal: ${fmtBytes(d.total)}`} style={{ marginBottom: 9 }}>
+                <div className="flex" style={{ justifyContent: 'space-between', fontSize: 12 }}>
+                  <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    <span style={{ color: 'var(--green)' }}>↓{fmtBytes(d.recv)}</span> · <span style={{ color: 'var(--accent-2)' }}>↑{fmtBytes(d.sent)}</span>
+                  </span>
+                </div>
+                <div style={{ display: 'flex', height: 7, borderRadius: 4, overflow: 'hidden', background: 'var(--bg-3)', marginTop: 3, width: `${Math.max(5, (d.total / max) * 100)}%` }}>
+                  <div style={{ width: `${(d.recv / (d.total || 1)) * 100}%`, background: 'var(--green)' }} />
+                  <div style={{ width: `${(d.sent / (d.total || 1)) * 100}%`, background: 'var(--accent-2)' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    },
+  },
   severity_breakdown: {
     title: 'Severity Breakdown', category: 'Analysis', span: 2, needs: ['severity'],
     render: (c) => {
@@ -306,7 +343,8 @@ export const DEFAULT_LAYOUT = [
   'kpi_bandwidth', 'kpi_devices',
   'timeline',
   'insights', 'severity_breakdown',
-  'allowed_blocked', 'top_src',
-  'top_dst_port', 'top_app',
-  'recent_threats', 'recent_events',
+  'bandwidth_devices', 'allowed_blocked',
+  'top_src', 'top_app',
+  'top_dst_port', 'recent_threats',
+  'recent_events',
 ];

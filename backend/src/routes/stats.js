@@ -198,6 +198,34 @@ router.get('/insights', async (req, res, next) => {
   }
 });
 
+// GET /api/stats/bandwidth -> per-device incoming (received) vs outgoing (sent) bytes.
+router.get('/bandwidth', async (req, res, next) => {
+  try {
+    const scope = req.adomScope;
+    const hours = Math.min(Math.max(parseInt(req.query.hours || '24', 10) || 24, 1), 720);
+    let where = `l.ts > now() - interval '${hours} hours'`;
+    const params = [];
+    if (scope != null) {
+      params.push(scope);
+      where += ` AND (l.adom_id = $1 OR l.device_id IN (SELECT device_id FROM device_viewers WHERE adom_id = $1))`;
+    }
+    const r = await pool.query(
+      `SELECT d.id AS device_id, d.name,
+              coalesce(sum(l.bytes_recv),0)::bigint AS recv,
+              coalesce(sum(l.bytes_sent),0)::bigint AS sent
+       FROM logs l JOIN devices d ON d.id = l.device_id
+       WHERE ${where}
+       GROUP BY d.id, d.name
+       ORDER BY (coalesce(sum(l.bytes_sent),0) + coalesce(sum(l.bytes_recv),0)) DESC
+       LIMIT 100`,
+      params
+    );
+    res.json(r.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/stats/severity -> distribution by severity level
 router.get('/severity', async (req, res, next) => {
   try {
