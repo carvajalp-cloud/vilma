@@ -4,6 +4,7 @@ import Layout from './components/Layout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Threats from './pages/Threats.jsx';
 import LogViewer from './pages/LogViewer.jsx';
 import Devices from './pages/Devices.jsx';
 import Events from './pages/Events.jsx';
@@ -26,6 +27,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<Dashboard />} />
+        <Route path="/threats" element={<Threats />} />
         <Route path="/logs" element={<LogViewer />} />
         <Route path="/devices" element={<Devices />} />
         <Route path="/events" element={<Events />} />

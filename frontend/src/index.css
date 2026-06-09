@@ -172,3 +172,41 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .lib-item .li-title { font-weight: 600; font-size: 13px; }
 .lib-item .li-desc { font-size: 11px; color: var(--text-dim); }
 .widget-empty { grid-column: span 4; text-align: center; padding: 50px; color: var(--text-dim); border: 1px dashed var(--border); border-radius: 8px; }
+
+/* ---- Threats: attack map ---- */
+.attack-map {
+  position: relative;
+  background: radial-gradient(circle at 50% 35%, #0f1a2b, #080c12 75%);
+  border: 1px solid var(--border); border-radius: 8px;
+  height: 48vh; min-height: 340px; overflow: hidden;
+}
+.attack-map .rsm-geography { outline: none; }
+.attack-arc {
+  fill: none; stroke-linecap: round;
+  stroke-dasharray: 1000; stroke-dashoffset: 1000;
+  animation: arc-draw 1.6s ease-out forwards, arc-fade 3.4s ease-out forwards;
+}
+@keyframes arc-draw { to { stroke-dashoffset: 0; } }
+@keyframes arc-fade { 0% { opacity: 0; } 12% { opacity: 1; } 75% { opacity: .8; } 100% { opacity: 0; } }
+.attack-pulse { transform-box: fill-box; transform-origin: center; animation: attack-pulse 1.3s ease-out infinite; }
+@keyframes attack-pulse { 0% { transform: scale(.4); opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
+.map-legend {
+  position: absolute; bottom: 10px; left: 12px; display: flex; gap: 14px;
+  background: rgba(13,17,23,.7); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 11px; color: var(--text-dim);
+}
+.map-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.map-stat { position: absolute; top: 10px; right: 12px; background: rgba(13,17,23,.7); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+
+/* ---- Threats: hover public-info popover ---- */
+.threat-pop {
+  position: fixed; z-index: 200; width: 310px;
+  background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.55); padding: 12px; font-size: 12px;
+}
+.threat-pop h4 { margin: 0 0 6px; font-size: 13px; }
+.threat-pop .desc { color: var(--text-dim); line-height: 1.5; margin-bottom: 8px; }
+.threat-pop .kv { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+.threat-pop .links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.threat-pop .links a { background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 11px; }
+.threat-pop .links a:hover { border-color: var(--accent-2); }

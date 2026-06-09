@@ -4,6 +4,7 @@ import AdomSelector from './AdomSelector.jsx';
 
 const TITLES = {
   '/': 'Dashboard',
+  '/threats': 'Threat Map',
   '/logs': 'Log Viewer',
   '/devices': 'Device Manager',
   '/events': 'Event Monitor',
@@ -23,6 +24,7 @@ export default function Layout() {
         <div className="brand"><span className="logo">◆</span> Vilma</div>
         <nav className="nav">
           <NavLink to="/" end>▦ Dashboard</NavLink>
+          <NavLink to="/threats">⊕ Threats</NavLink>
           <NavLink to="/logs">≣ Log Viewer</NavLink>
           <NavLink to="/events">⚠ Events</NavLink>
           <NavLink to="/devices">▣ Devices</NavLink>
